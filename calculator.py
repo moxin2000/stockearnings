@@ -12,6 +12,8 @@ import yfinance as yf
 from datetime import datetime, timedelta
 from scipy.interpolate import interp1d
 import numpy as np
+import pandas as pd
+
 
 def filter_dates(dates):
     today = datetime.today().date()
@@ -95,6 +97,7 @@ def get_current_price(ticker):
     return todays_data['Close'][0]
 
 
+@st.cache_data
 def compute_recommendation(ticker):
     try:
         ticker = ticker.strip().upper()
@@ -196,44 +199,108 @@ def compute_recommendation(ticker):
         return f'Error occurred processing: {e}'
 
 
+def fetch_earnings_for_date(date):
+    try:
+        date_str = date.strftime("%Y-%m-%d")
+        url = f"https://finance.yahoo.com/calendar/earnings?day={date_str}"
+        df = pd.read_html(url)[0]  # Read the first table
+        return df
+    except Exception as e:
+        st.error(f"Error fetching earnings data: {e}")
+        return pd.DataFrame()
+
+def analyze_earnings_data(earnings_df):
+    results = []
+    for index, row in earnings_df.iterrows():
+        ticker = row['Symbol']
+        try:
+            recommendation = compute_recommendation(ticker)
+
+            if isinstance(recommendation, str):
+                results.append({'Symbol': ticker, 'Recommendation': recommendation})
+            else:
+                avg_volume_bool = recommendation['avg_volume']
+                iv30_rv30_bool = recommendation['iv30_rv30']
+                ts_slope_bool = recommendation['ts_slope_0_45']
+                expected_move = recommendation['expected_move']
+
+                if avg_volume_bool and iv30_rv30_bool and ts_slope_bool:
+                    title = "Recommended"
+                elif ts_slope_bool and ((avg_volume_bool and not iv30_rv30_bool) or (
+                        iv30_rv30_bool and not avg_volume_bool)):
+                    title = "Consider"
+                else:
+                    title = "Avoid"
+
+                results.append({
+                    'Symbol': ticker,
+                    'Recommendation': title,
+                    'Avg Volume': 'PASS' if avg_volume_bool else 'FAIL',
+                    'IV30/RV30': 'PASS' if iv30_rv30_bool else 'FAIL',
+                    'Term Structure Slope': 'PASS' if ts_slope_bool else 'FAIL',
+                    'Expected Move': expected_move
+                })
+        except Exception as e:
+            results.append({'Symbol': ticker, 'Recommendation': f'Analysis Error: {e}'})
+    return pd.DataFrame(results)
+
+
 # Streamlit App
 def main():
-    st.title("Earnings Position Checker")
+    st.sidebar.title("Navigation")
+    selection = st.sidebar.radio("Go to", ["Search Stock", "Earnings per Date"])
 
-    stock_symbol = st.text_input("Enter Stock Symbol:", "AAPL").upper()  # Default AAPL
+    if selection == "Search Stock":
+        st.title("Earnings Position Checker")
+        stock_symbol = st.text_input("Enter Stock Symbol:", "AAPL").upper()  # Default AAPL
 
-    if st.button("Submit"):
-        with st.spinner(f"Analyzing {stock_symbol}..."):
-            try:
-                recommendation = compute_recommendation(stock_symbol)
+        if st.button("Submit"):
+            with st.spinner(f"Analyzing {stock_symbol}..."):
+                try:
+                    recommendation = compute_recommendation(stock_symbol)
 
-                if isinstance(recommendation, str):
-                    st.error(recommendation)  # Display error messages
-                else:
-                    avg_volume_bool = recommendation['avg_volume']
-                    iv30_rv30_bool = recommendation['iv30_rv30']
-                    ts_slope_bool = recommendation['ts_slope_0_45']
-                    expected_move = recommendation['expected_move']
-
-                    if avg_volume_bool and iv30_rv30_bool and ts_slope_bool:
-                        title = "Recommended"
-                        title_color = "#006600"
-                    elif ts_slope_bool and ((avg_volume_bool and not iv30_rv30_bool) or (
-                            iv30_rv30_bool and not avg_volume_bool)):
-                        title = "Consider"
-                        title_color = "#ff9900"
+                    if isinstance(recommendation, str):
+                        st.error(recommendation)  # Display error messages
                     else:
-                        title = "Avoid"
-                        title_color = "#800000"
+                        avg_volume_bool = recommendation['avg_volume']
+                        iv30_rv30_bool = recommendation['iv30_rv30']
+                        ts_slope_bool = recommendation['ts_slope_0_45']
+                        expected_move = recommendation['expected_move']
 
-                    st.markdown(f"<h2 style='color: {title_color};'>{title}</h2>", unsafe_allow_html=True)
-                    st.write(f"Average Volume: {'PASS' if avg_volume_bool else 'FAIL'}")
-                    st.write(f"IV30/RV30: {'PASS' if iv30_rv30_bool else 'FAIL'}")
-                    st.write(f"Term Structure Slope: {'PASS' if ts_slope_bool else 'FAIL'}")
-                    st.write(f"Expected Move: {expected_move}")
+                        if avg_volume_bool and iv30_rv30_bool and ts_slope_bool:
+                            title = "Recommended"
+                            title_color = "#006600"
+                        elif ts_slope_bool and ((avg_volume_bool and not iv30_rv30_bool) or (
+                                iv30_rv30_bool and not avg_volume_bool)):
+                            title = "Consider"
+                            title_color = "#ff9900"
+                        else:
+                            title = "Avoid"
+                            title_color = "#800000"
 
-            except Exception as e:
-                st.error(f"An unexpected error occurred: {e}")
+                        st.markdown(f"<h2 style='color: {title_color};'>{title}</h2>", unsafe_allow_html=True)
+                        st.write(f"Average Volume: {'PASS' if avg_volume_bool else 'FAIL'}")
+                        st.write(f"IV30/RV30: {'PASS' if iv30_rv30_bool else 'FAIL'}")
+                        st.write(f"Term Structure Slope: {'PASS' if ts_slope_bool else 'FAIL'}")
+                        st.write(f"Expected Move: {expected_move}")
+
+                except Exception as e:
+                    st.error(f"An unexpected error occurred: {e}")
+
+    elif selection == "Earnings per Date":
+        st.title("Earnings Analysis by Date")
+        selected_date = st.date_input("Select Date", datetime.today())
+
+        if st.button("Analyze Earnings"):
+            with st.spinner(f"Fetching earnings data for {selected_date.strftime('%Y-%m-%d')}..."):
+                earnings_data = fetch_earnings_for_date(selected_date)
+                if not earnings_data.empty:
+                    with st.spinner("Analyzing earnings data..."):
+                        analysis_results = analyze_earnings_data(earnings_data)
+                        st.write("Analysis Results:")
+                        st.dataframe(analysis_results)
+                else:
+                    st.warning("No earnings data found for the selected date.")
 
 
 if __name__ == "__main__":
