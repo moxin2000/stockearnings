@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 from scipy.interpolate import interp1d
 import numpy as np
 import pandas as pd
+import time
 
 
 def filter_dates(dates):
@@ -24,7 +25,7 @@ def filter_dates(dates):
     arr = []
     for i, date in enumerate(sorted_dates):
         if date >= cutoff_date:
-            arr = [d.strftime("%Y-%m-%d") for d in sorted_dates[:i+1]]
+            arr = [d.strftime("%Y-%m-%d") for d in sorted_dates[:i + 1]]
             break
 
     if len(arr) > 0:
@@ -41,10 +42,10 @@ def yang_zhang(price_data, window=30, trading_periods=252, return_last_only=True
     log_co = (price_data['Close'] / price_data['Open']).apply(np.log)
 
     log_oc = (price_data['Open'] / price_data['Close'].shift(1)).apply(np.log)
-    log_oc_sq = log_oc**2
+    log_oc_sq = log_oc ** 2
 
     log_cc = (price_data['Close'] / price_data['Close'].shift(1)).apply(np.log)
-    log_cc_sq = log_cc**2
+    log_cc_sq = log_cc ** 2
 
     rs = log_ho * (log_ho - log_co) + log_lo * (log_lo - log_co)
 
@@ -63,7 +64,7 @@ def yang_zhang(price_data, window=30, trading_periods=252, return_last_only=True
         center=False
     ).sum() * (1.0 / (window - 1.0))
 
-    k = 0.34 / (1.34 + ((window + 1) / (window - 1)) )
+    k = 0.34 / (1.34 + ((window + 1) / (window - 1)))
     result = (open_vol + k * close_vol + (1 - k) * window_rs).apply(np.sqrt) * np.sqrt(trading_periods)
 
     if return_last_only:
@@ -194,7 +195,8 @@ def compute_recommendation(ticker):
         expected_move = str(round(straddle / underlying_price * 100, 2)) + "%" if straddle else None
 
         return {'avg_volume': avg_volume >= 1500000, 'iv30_rv30': iv30_rv30 >= 1.25,
-                'ts_slope_0_45': ts_slope_0_45 <= -0.00406, 'expected_move': expected_move}  # Check that they are in our desired range (see video)
+                'ts_slope_0_45': ts_slope_0_45 <= -0.00406,
+                'expected_move': expected_move}  # Check that they are in our desired range (see video)
     except Exception as e:
         return f'Error occurred processing: {e}'
 
@@ -218,6 +220,9 @@ def analyze_earnings_data(earnings_df):
     for index, row in earnings_df.iterrows():
         ticker = row['Symbol']
         try:
+            # Add a delay to avoid rate limiting
+            time.sleep(1)
+
             recommendation = compute_recommendation(ticker)
 
             if isinstance(recommendation, str):
@@ -304,7 +309,8 @@ def main():
                         st.write("Analysis Results:")
                         st.dataframe(analysis_results)
                 else:
-                    st.warning("No earnings data found for the selected date. This could be due to the website having no data for the given date, or due to the website format changing.")
+                    st.warning(
+                        "No earnings data found for the selected date. This could be due to the website having no data for the given date, or due to the website format changing.")
 
 
 if __name__ == "__main__":
