@@ -203,11 +203,15 @@ def fetch_earnings_for_date(date):
     try:
         date_str = date.strftime("%Y-%m-%d")
         url = f"https://finance.yahoo.com/calendar/earnings?day={date_str}"
-        df = pd.read_html(url)[0]  # Read the first table
-        return df
+        earnings_df = pd.read_html(url, attrs={'class': 'W(100%)'}, flavor='lxml')[0]  # Read the first table
+        return earnings_df
+    except ImportError:
+        st.error("Error: The 'lxml' library is required. Please install it using: pip install lxml")
+        return pd.DataFrame()
     except Exception as e:
         st.error(f"Error fetching earnings data: {e}")
         return pd.DataFrame()
+
 
 def analyze_earnings_data(earnings_df):
     results = []
@@ -300,7 +304,7 @@ def main():
                         st.write("Analysis Results:")
                         st.dataframe(analysis_results)
                 else:
-                    st.warning("No earnings data found for the selected date.")
+                    st.warning("No earnings data found for the selected date. This could be due to the website having no data for the given date, or due to the website format changing.")
 
 
 if __name__ == "__main__":
